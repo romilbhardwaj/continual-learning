@@ -104,9 +104,13 @@ class Classifier(ContinualLearner, Replayer, ExemplarHandler):
                 # -binary prediction loss
                 binary_targets = utils.to_one_hot(y.cpu(), y_hat.size(1)).to(y.device)
                 if self.binaryCE_distill and (scores is not None):
-                    classes_per_task = int(y_hat.size(1) / task)
+                    classes_per_task = 10 #int(y_hat.size(1) / task)
+                    #print("0AAAA {} 0BBBB {}".format(y_hat.size(), binary_targets.size()))
                     binary_targets = binary_targets[:, -(classes_per_task):]
-                    binary_targets = torch.cat([torch.sigmoid(scores / self.KD_temp), binary_targets], dim=1)
+                    #print("1AAAA {} 1BBBB {}".format(y_hat.size(), binary_targets.size()))
+                    binary_targets = torch.cat([torch.sigmoid(scores / self.KD_temp)], dim=1)
+                    #print("2AAAA {} 2BBBB {}".format(y_hat.size(), binary_targets.size()))
+                #print("AAAA {} BBBB {}".format(y_hat.size(), binary_targets.size()))
                 predL = None if y is None else F.binary_cross_entropy_with_logits(
                     input=y_hat, target=binary_targets, reduction='none'
                 ).sum(dim=1).mean()     #--> sum over classes, then average over batch

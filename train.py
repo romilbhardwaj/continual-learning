@@ -84,10 +84,10 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
         active_classes = None  # -> for Domain-IL scenario, always all classes are active
         if scenario == "task":
             # -for Task-IL scenario, create <list> with for all tasks so far a <list> with the active classes
-            active_classes = [list(range(classes_per_task * i, classes_per_task * (i + 1))) for i in range(task)]
+            active_classes = [list(range(classes_per_task)) for i in range(task)]
         elif scenario == "class":
             # -for Class-IL scenario, create one <list> with active classes of all tasks so far
-            active_classes = list(range(classes_per_task * task))
+            active_classes = list(range(classes_per_task)) #list(range(classes_per_task * task))
 
         # Reset state of optimizer(s) for every task (if requested)
         if model.optim_type=="adam_reset":
@@ -153,7 +153,7 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
                 binary_distillation = hasattr(model, "binaryCE") and model.binaryCE and model.binaryCE_distill
                 if binary_distillation and scenario=="class" and (previous_model is not None):
                     with torch.no_grad():
-                        scores = previous_model(x)[:, :(classes_per_task * (task - 1))]
+                        scores = previous_model(x)[:, :(classes_per_task)]
                 else:
                     scores = None
 
@@ -174,7 +174,7 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
                     if (model.replay_targets=="soft"):
                         with torch.no_grad():
                             scores_ = previous_model(x_)
-                        scores_ = scores_[:, :(classes_per_task*(task-1))] if scenario=="class" else scores_
+                        scores_ = scores_[:, :(classes_per_task)] if scenario=="class" else scores_
                         #-> when scenario=="class", zero probabilities will be added in the [utils.loss_fn_kd]-function
                 elif scenario=="task":
                     # Sample replayed training data, wrap in (cuda-)Variables and store in lists
@@ -186,7 +186,7 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
                         x_.append(x_temp.to(device))
                         # -only keep [y_] if required (as otherwise unnecessary computations will be done)
                         if model.replay_targets=="hard":
-                            y_temp = y_temp - (classes_per_task*task_id) #-> adjust y-targets to 'active range'
+                            y_temp = y_temp - (classes_per_task) #-> adjust y-targets to 'active range'
                             y_.append(y_temp.to(device))
                         else:
                             y_.append(None)
@@ -196,7 +196,7 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
                         for task_id in range(up_to_task):
                             with torch.no_grad():
                                 scores_temp = previous_model(x_[task_id])
-                            scores_temp = scores_temp[:, (classes_per_task*task_id):(classes_per_task*(task_id+1))]
+                            scores_temp = scores_temp[:, (classes_per_task):(classes_per_task)]
                             scores_.append(scores_temp)
 
             ##-->> Generative / Current Replay <<--##
@@ -213,7 +213,7 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
                 if scenario in ("domain", "class") and (
                         (not hasattr(previous_model, "mask_dict")) or (previous_model.mask_dict is None)
                 ):
-                    scores_ = all_scores_[:,:(classes_per_task * (task - 1))] if scenario == "class" else all_scores_
+                    scores_ = all_scores_[:,:(classes_per_task)] if scenario == "class" else all_scores_
                     _, y_ = torch.max(scores_, dim=1)
                 else:
                     # NOTE: it's possible to have scenario=domain with task-mask (so actually it's the Task-IL scenario)
@@ -230,7 +230,7 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
                             temp_scores_ = all_scores_
                         else:
                             temp_scores_ = all_scores_[:,
-                                           (classes_per_task * task_id):(classes_per_task * (task_id + 1))]
+                                           classes_per_task]
                         _, temp_y_ = torch.max(temp_scores_, dim=1)
                         scores_.append(temp_scores_)
                         y_.append(temp_y_)
@@ -296,8 +296,8 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
         if isinstance(model, ContinualLearner) and (model.ewc_lambda>0):
             # -find allowed classes
             allowed_classes = list(
-                range(classes_per_task*(task-1), classes_per_task*task)
-            ) if scenario=="task" else (list(range(classes_per_task*task)) if scenario=="class" else None)
+                range(classes_per_task)
+            ) if scenario=="task" else (list(range(classes_per_task)) if scenario=="class" else None)
             # -if needed, apply correct task-specific mask
             if model.mask_dict is not None:
                 model.apply_XdGmask(task=task)
@@ -310,12 +310,11 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
 
         # EXEMPLARS: update exemplar sets
         if (add_exemplars or use_exemplars) or replay_mode=="exemplars":
-            exemplars_per_class = int(np.floor(model.memory_budget / (classes_per_task*task)))
+            exemplars_per_class = int(np.floor(model.memory_budget / (classes_per_task)))
             # reduce examplar-sets
             model.reduce_exemplar_sets(exemplars_per_class)
             # for each new class trained on, construct examplar-set
-            new_classes = list(range(classes_per_task)) if scenario=="domain" else list(range(classes_per_task*(task-1),
-                                                                                              classes_per_task*task))
+            new_classes = list(range(classes_per_task)) if scenario=="domain" else list(range(classes_per_task))
             for class_id in new_classes:
                 start = time.time()
                 # create new dataset containing only all examples of this class
@@ -347,8 +346,8 @@ def train_cl(model, train_datasets, replay_mode="none", scenario="class",classes
                         previous_datasets.append(
                             ExemplarDataset(
                                 model.exemplar_sets[
-                                (classes_per_task * task_id):(classes_per_task * (task_id + 1))],
-                                target_transform=lambda y, x=classes_per_task * task_id: y + x)
+                                list(range(classes_per_task))],
+                                target_transform=lambda y, x=classes_per_task: y + x)
                         )
                 else:
                     target_transform = (lambda y, x=classes_per_task: y % x) if scenario == "domain" else None

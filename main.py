@@ -101,10 +101,10 @@ eval_params = parser.add_argument_group('Evaluation Parameters')
 eval_params.add_argument('--pdf', action='store_true', help="generate pdf with results")
 eval_params.add_argument('--visdom', action='store_true', help="use visdom for on-the-fly plots")
 eval_params.add_argument('--log-per-task', action='store_true', help="set all visdom-logs to [iters]")
-eval_params.add_argument('--loss-log', type=int, default=200, metavar="N", help="# iters after which to plot loss")
-eval_params.add_argument('--prec-log', type=int, default=200, metavar="N", help="# iters after which to plot precision")
+eval_params.add_argument('--loss-log', type=int, default=100, metavar="N", help="# iters after which to plot loss")
+eval_params.add_argument('--prec-log', type=int, default=100, metavar="N", help="# iters after which to plot precision")
 eval_params.add_argument('--prec-n', type=int, default=1024, help="# samples for evaluating solver's precision")
-eval_params.add_argument('--sample-log', type=int, default=500, metavar="N", help="# iters after which to plot samples")
+eval_params.add_argument('--sample-log', type=int, default=100, metavar="N", help="# iters after which to plot samples")
 eval_params.add_argument('--sample-n', type=int, default=64, help="# images to show")
 
 
@@ -424,8 +424,8 @@ def run(args):
     # Evaluate precision of final model on full test-set
     precs = [evaluate.validate(
         model, test_datasets[i], verbose=False, test_size=None, task=i+1, with_exemplars=False,
-        allowed_classes=list(range(classes_per_task*i, classes_per_task*(i+1))) if scenario=="task" else None
-    ) for i in range(args.tasks)]
+        allowed_classes=list(range(classes_per_task)) if scenario=="task" else None
+    )[0] for i in range(args.tasks)]
     print("\n Precision on test-set (softmax classification):")
     for i in range(args.tasks):
         print(" - Task {}: {:.4f}".format(i + 1, precs[i]))
@@ -436,8 +436,8 @@ def run(args):
     if args.use_exemplars:
         precs = [evaluate.validate(
             model, test_datasets[i], verbose=False, test_size=None, task=i+1, with_exemplars=True,
-            allowed_classes=list(range(classes_per_task*i, classes_per_task*(i+1))) if scenario=="task" else None
-        ) for i in range(args.tasks)]
+            allowed_classes=list(range(classes_per_task)) if scenario=="task" else None
+        )[0] for i in range(args.tasks)]
         print("\n Precision on test-set (classification using exemplars):")
         for i in range(args.tasks):
             print(" - Task {}: {:.4f}".format(i + 1, precs[i]))

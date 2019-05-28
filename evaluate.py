@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import numpy as np
 import torch
 import visual_visdom
@@ -33,6 +35,10 @@ def validate(model, dataset, batch_size=128, test_size=1024, verbose=True, allow
     # Loop over batches in [dataset]
     data_loader = utils.get_data_loader(dataset, batch_size, cuda=model._is_on_cuda())
     total_tested = total_correct = 0
+
+    classwise_correct = defaultdict(lambda:0)
+    classwise_total = defaultdict(lambda:0)
+
     for data, labels in data_loader:
         # -break on [test_size] (if "None", full dataset is used)
         if test_size:
@@ -51,15 +57,29 @@ def validate(model, dataset, batch_size=128, test_size=1024, verbose=True, allow
                 scores = model(data) if (allowed_classes is None) else model(data)[:, allowed_classes]
                 _, predicted = torch.max(scores, 1)
         # -update statistics
+
+        for i in range(0,10):
+            classwise_correct[i] += (labels[predicted == labels]==i).sum().item()
+            classwise_total[i] += (labels == i).sum().item()
         total_correct += (predicted == labels).sum().item()
         total_tested += len(data)
     precision = total_correct / total_tested
+
+    print("Classwise Precision:")
+    classwise_precision = {}
+    for i in range(0, 10):
+        if classwise_total[i] == 0:
+            classwise_precision[i] = 0
+        else:
+            classwise_precision[i] = classwise_correct[i]/float(classwise_total[i])
+        print("Class {}: {:.2f}".format(i, classwise_precision[i]))
+
 
     # Set model back to its initial mode, print result on screen (if requested) and return it
     model.train(mode=mode)
     if verbose:
         print('=> precision: {:.3f}'.format(precision))
-    return precision
+    return precision, classwise_precision
 
 
 def initiate_precision_dict(n_tasks):
@@ -85,6 +105,7 @@ def precision(model, datasets, current_task, iteration, classes_per_task=None, s
     # Evaluate accuracy of model predictions for all tasks so far (reporting "0" for future tasks)
     n_tasks = len(datasets)
     precs = []
+    class5precs = []
     for i in range(n_tasks):
         if i+1 <= current_task:
             if scenario=='domain':
@@ -92,13 +113,16 @@ def precision(model, datasets, current_task, iteration, classes_per_task=None, s
             elif scenario=='task':
                 allowed_classes = list(range(classes_per_task*i, classes_per_task*(i+1)))
             elif scenario=='class':
-                allowed_classes = list(range(classes_per_task*current_task))
-            precs.append(validate(model, datasets[i], test_size=test_size, verbose=verbose,
+                allowed_classes = list(range(classes_per_task))
+            total_prec, classwise_prec = validate(model, datasets[i], test_size=test_size, verbose=verbose,
                                   allowed_classes=allowed_classes, with_exemplars=with_exemplars,
-                                  no_task_mask=no_task_mask, task=i+1))
+                                  no_task_mask=no_task_mask, task=i+1)
+            precs.append(total_prec)
+            class5precs.append(classwise_prec[5])
         else:
             precs.append(0)
     average_precs = sum([precs[task_id] for task_id in range(current_task)]) / current_task
+    class5precs = sum([class5precs[task_id] for task_id in range(current_task)]) / current_task
 
     # Print results on screen
     if verbose:
@@ -115,6 +139,10 @@ def precision(model, datasets, current_task, iteration, classes_per_task=None, s
             visual_visdom.visualize_scalars(
                 [average_precs], names=["ave"], title="ave precision ({})".format(visdom["graph"]),
                 iteration=iteration, env=visdom["env"], ylabel="test precision"
+            )
+            visual_visdom.visualize_scalars(
+                [class5precs], names=["class5prec"], title="class5 precision ({})".format(visdom["graph"]),
+                iteration=iteration, env=visdom["env"], ylabel="class5 precision"
             )
 
     # Append results to [progress]-dictionary and return

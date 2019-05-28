@@ -89,6 +89,66 @@ class SubDataset(Dataset):
             sample = (sample[0], target)
         return sample
 
+def get_skew_indices(dataset, class_to_skew=5, skew_ratio=0.9):
+    '''
+    Returns a pair of indexes - first one with a class skewed + dataset and other with just the remaining samples of the skewed class
+    :param dataset: 
+    :param class_to_skew: 
+    :param skew_ratio: 
+    :return: 
+    '''
+    class_indices = []
+    other_indices = []
+    example_samples = {}
+    for index in range(len(dataset)):
+        if hasattr(dataset, "train_labels"):
+            if dataset.target_transform is None:
+                label = dataset.train_labels[index]
+            else:
+                label = dataset.target_transform(dataset.train_labels[index])
+        elif hasattr(dataset, "test_labels"):
+            if dataset.target_transform is None:
+                label = dataset.test_labels[index]
+            else:
+                label = dataset.target_transform(dataset.test_labels[index])
+        else:
+            label = dataset[index][1]
+        if label == class_to_skew:
+            class_indices.append(index)
+        else:
+            other_indices.append(index)
+        if label not in example_samples:
+            example_samples[label] = index
+
+    print("Class indices: {}\nOther indices: {}".format(len(class_indices), len(other_indices)))
+
+    stop_idx = int(skew_ratio*len(class_indices))
+    skew_class_to_include_first = class_indices[0:stop_idx]
+    skew_class_to_include_second = class_indices[stop_idx:]
+    first_indices = sorted(other_indices + skew_class_to_include_first)
+    second_indices = skew_class_to_include_second# + list(example_samples.values())  # Include one example of each class just to make this code work
+
+    print("first_indices: {}\nsecond_indices: {}".format(len(first_indices), len(second_indices)))
+
+    return first_indices, second_indices
+
+
+class IndexSubsampledDataset(Dataset):
+    '''
+    Returns a dataset with only the sub_indexes in the dataset
+    '''
+
+    def __init__(self, original_dataset, sub_indices):
+        super().__init__()
+        self.dataset = original_dataset
+        self.sub_indices = sub_indices
+
+    def __len__(self):
+        return len(self.sub_indices)
+
+    def __getitem__(self, index):
+        sample = self.dataset[self.sub_indices[index]]
+        return sample
 
 class ExemplarDataset(Dataset):
     '''Create dataset from list of <np.arrays> with shape (N, C, H, W) (i.e., with N images each).
@@ -180,7 +240,27 @@ def get_multitask_experiment(name, scenario, tasks, data_dir="./datasets", only_
                                                  target_transform=target_transform, verbose=verbose))
     elif name == 'splitMNIST':
         # check for number of tasks
-        if tasks>10:
+        assert tasks == 2, "Can have only two tasks!"
+        classes_per_task = 10    #TODO This should be 10 but fix later
+        # configurations
+        config = DATASET_CONFIGS['mnist28']
+        if not only_config:
+            # prepare train and test datasets with all classes
+            target_transform = transforms.Lambda(lambda y, x=None: y)
+            mnist_train = get_dataset('mnist28', type="train", dir=data_dir, target_transform=target_transform, verbose=verbose)
+            mnist_test = get_dataset('mnist28', type="test", dir=data_dir, target_transform=target_transform, verbose=verbose)
+
+            # split them up into sub-tasks - one class is imbalanced across the two tasks.
+            CLASS_TO_IMBALANCE = 5
+
+            first_train_idxs, second_train_idxs = get_skew_indices(mnist_train, class_to_skew=CLASS_TO_IMBALANCE, skew_ratio=0.05)
+
+            train_datasets = [IndexSubsampledDataset(mnist_train, first_train_idxs), IndexSubsampledDataset(mnist_train, second_train_idxs)]
+            test_datasets = [mnist_test, mnist_test]
+
+    elif name == 'splitMNIST_original':
+        # check for number of tasks
+        if tasks > 10:
             raise ValueError("Experiment 'splitMNIST' cannot have more than 10 tasks!")
         # configurations
         config = DATASET_CONFIGS['mnist28']
@@ -204,7 +284,7 @@ def get_multitask_experiment(name, scenario, tasks, data_dir="./datasets", only_
             for labels in labels_per_task:
                 target_transform = transforms.Lambda(
                     lambda y, x=labels[0]: y - x
-                ) if scenario=='domain' else None
+                ) if scenario == 'domain' else None
                 train_datasets.append(SubDataset(mnist_train, labels, target_transform=target_transform))
                 test_datasets.append(SubDataset(mnist_test, labels, target_transform=target_transform))
     else:
@@ -212,6 +292,8 @@ def get_multitask_experiment(name, scenario, tasks, data_dir="./datasets", only_
 
     # If needed, update number of (total) classes in the config-dictionary
     config['classes'] = classes_per_task if scenario=='domain' else classes_per_task*tasks
+    config['classes'] = 10 if name == 'splitMNIST' else config['classes']
+    print("USING {} CLASSES.".format(config['classes']))
 
     # Return tuple of train-, validation- and test-dataset, config-dictionary and number of classes per task
     return config if only_config else ((train_datasets, test_datasets), config, classes_per_task)
